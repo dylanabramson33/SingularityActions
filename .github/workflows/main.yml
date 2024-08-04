@@ -1,0 +1,70 @@
+name: Convert Docker to Singularity
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  convert-to-singularity:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Singularity
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libssl-dev \
+          uuid-dev \
+          libgpgme11-dev \
+          squashfs-tools \
+          libseccomp-dev \
+          wget \
+          pkg-config \
+          git
+        wget https://go.dev/dl/go1.17.linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzvf go1.17.linux-amd64.tar.gz
+        export PATH=/usr/local/go/bin:$PATH
+        wget https://github.com/sylabs/singularity/releases/download/v3.8.0/singularity-ce-3.8.0.tar.gz
+        tar -xzf singularity-ce-3.8.0.tar.gz
+        cd singularity-ce-3.8.0
+        ./mconfig
+        make -C builddir
+        sudo make -C builddir install
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v1
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Convert Docker images to Singularity
+      run: |
+        mkdir singularity_images
+        
+        # List of images to convert (adjust as needed)
+        images=(
+          "ghcr.io/${{ github.repository_owner }}/scicomp-base:latest"
+          "ghcr.io/${{ github.repository_owner }}/project1:latest"
+          "ghcr.io/${{ github.repository_owner }}/project2:latest"
+        )
+        
+        for image in "${images[@]}"
+        do
+          image_name=$(echo $image | cut -d'/' -f3 | cut -d':' -f1)
+          singularity build singularity_images/${image_name}.sif docker://${image}
+        done
+
+    - name: Upload Singularity images
+      uses: actions/upload-artifact@v2
+      with:
+        name: singularity-images
+        path: singularity_images/*.sif
